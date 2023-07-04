@@ -1,0 +1,1480 @@
+Index: src/test/java/course/concurrency/m3_shared/immutable/OrderServiceTests.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1251
+===================================================================
+diff --git a/src/test/java/course/concurrency/m3_shared/immutable/OrderServiceTests.java b/src/test/java/course/concurrency/m3_shared/immutable/OrderServiceTests.java
+new file mode 100644
+--- /dev/null	(date 1683572585930)
++++ b/src/test/java/course/concurrency/m3_shared/immutable/OrderServiceTests.java	(date 1683572585930)
+@@ -0,0 +1,98 @@
++package course.concurrency.m3_shared.immutable;
++
++import org.junit.jupiter.api.RepeatedTest;
++import org.junit.jupiter.api.Test;
++
++import java.util.List;
++import java.util.concurrent.*;
++
++import static org.junit.jupiter.api.Assertions.assertFalse;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++public class OrderServiceTests {
++
++    private OrderService service = new OrderService();
++
++    private List<Item> items = List.of(new Item(), new Item());
++
++    @Test
++    public void testDelivery() {
++        long orderId = service.createOrder(items);
++        service.setPacked(orderId);
++        service.updatePaymentInfo(orderId, new PaymentInfo());
++
++        boolean isDelivered = service.isDelivered(orderId);
++        assertTrue(isDelivered);
++    }
++
++    @Test
++    public void testDeliveryWithDuplicatePacking() {
++        long orderId = service.createOrder(items);
++        service.setPacked(orderId);
++        service.setPacked(orderId);
++        service.setPacked(orderId);
++        service.updatePaymentInfo(orderId, new PaymentInfo());
++
++        boolean isDelivered = service.isDelivered(orderId);
++        assertTrue(isDelivered);
++    }
++
++    @Test
++    public void testPartialCompleteWithDelivery() {
++        long orderId = service.createOrder(items);
++        service.updatePaymentInfo(orderId, new PaymentInfo());
++
++        boolean isDelivered = service.isDelivered(orderId);
++        assertFalse(isDelivered);
++    }
++
++    @Test
++    public void testPartialCompleteWithPacking() {
++        long orderId = service.createOrder(items);
++        service.setPacked(orderId);
++
++        boolean isDelivered = service.isDelivered(orderId);
++        assertFalse(isDelivered);
++    }
++
++    @Test
++    public void testPartialCompleteWith2Packing() {
++        long orderId = service.createOrder(items);
++        service.setPacked(orderId);
++        service.setPacked(orderId);
++
++        boolean isDelivered = service.isDelivered(orderId);
++        assertFalse(isDelivered);
++    }
++
++    @RepeatedTest(5)
++    public void testWithManyThreads() throws InterruptedException {
++        int iterations = 10_000;
++        ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
++
++        BlockingQueue<Long> orderToPack = new ArrayBlockingQueue<>(iterations*3);
++        BlockingQueue<Long> orderToPay = new ArrayBlockingQueue<>(iterations);
++        BlockingQueue<Long> orderIdLog = new ArrayBlockingQueue<>(iterations);
++
++        for(int i = 0; i< iterations; ++i) {
++            Long id = service.createOrder(items);
++                        orderToPack.offer(id);
++                        orderToPay.offer(id);
++                        orderIdLog.offer(id);
++        }
++
++        for(int i = 0; i< iterations; ++i) {
++            executor.submit(() -> service.setPacked(orderToPack.poll()));
++            executor.submit(() -> service.updatePaymentInfo(orderToPay.poll(), new PaymentInfo()));
++        }
++
++        executor.shutdown();
++        executor.awaitTermination(1, TimeUnit.MINUTES);
++
++        do {
++            long orderId = orderIdLog.take();
++            boolean isDelivered = service.isDelivered(orderId);
++            assertTrue(isDelivered, String.format("Order %d is not completed", orderId));
++        } while (!orderIdLog.isEmpty());
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionStoppable.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionStoppable.java b/src/main/java/course/concurrency/exams/auction/AuctionStoppable.java
+new file mode 100644
+--- /dev/null	(date 1681219099829)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionStoppable.java	(date 1681219099829)
+@@ -0,0 +1,7 @@
++package course.concurrency.exams.auction;
++
++public interface AuctionStoppable extends Auction {
++
++    // stop auction and return latest bid
++    Bid stopAuction();
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionPessimistic.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionPessimistic.java b/src/main/java/course/concurrency/exams/auction/AuctionPessimistic.java
+new file mode 100644
+--- /dev/null	(date 1681219099819)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionPessimistic.java	(date 1681219099819)
+@@ -0,0 +1,25 @@
++package course.concurrency.exams.auction;
++
++public class AuctionPessimistic implements Auction {
++
++    private Notifier notifier;
++
++    public AuctionPessimistic(Notifier notifier) {
++        this.notifier = notifier;
++    }
++
++    private Bid latestBid;
++
++    public boolean propose(Bid bid) {
++        if (bid.getPrice() > latestBid.getPrice()) {
++            notifier.sendOutdatedMessage(latestBid);
++            latestBid = bid;
++            return true;
++        }
++        return false;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid;
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionOptimistic.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionOptimistic.java b/src/main/java/course/concurrency/exams/auction/AuctionOptimistic.java
+new file mode 100644
+--- /dev/null	(date 1681219099810)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionOptimistic.java	(date 1681219099810)
+@@ -0,0 +1,25 @@
++package course.concurrency.exams.auction;
++
++public class AuctionOptimistic implements Auction {
++
++    private Notifier notifier;
++
++    public AuctionOptimistic(Notifier notifier) {
++        this.notifier = notifier;
++    }
++
++    private Bid latestBid;
++
++    public boolean propose(Bid bid) {
++        if (bid.getPrice() > latestBid.getPrice()) {
++            notifier.sendOutdatedMessage(latestBid);
++            latestBid = bid;
++            return true;
++        }
++        return false;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid;
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/Auction.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/Auction.java b/src/main/java/course/concurrency/exams/auction/Auction.java
+new file mode 100644
+--- /dev/null	(date 1681219099800)
++++ b/src/main/java/course/concurrency/exams/auction/Auction.java	(date 1681219099800)
+@@ -0,0 +1,8 @@
++package course.concurrency.exams.auction;
++
++public interface Auction {
++
++    boolean propose(Bid bid);
++
++    Bid getLatestBid();
++}
+Index: src/main/java/course/concurrency/m3_shared/threadLocal/TL_example1.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example1.java b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example1.java
+new file mode 100644
+--- /dev/null	(date 1681219099970)
++++ b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example1.java	(date 1681219099970)
+@@ -0,0 +1,23 @@
++package course.concurrency.m3_shared.threadLocal;
++
++public class TL_example1 {
++
++    public static class Task implements Runnable {
++        private static final ThreadLocal<Integer> value = ThreadLocal.withInitial(() -> 0);
++
++        @Override
++        public void run() {
++            Integer currentValue = value.get();
++            value.set(currentValue + 1);
++            System.out.print(value.get() + " ");
++        }
++    }
++
++    public static void main(String[] args) {
++        Task task1 = new Task();
++
++        new Thread(task1).start();
++        new Thread(task1).start();
++        new Thread(task1).start();
++    }
++}
+Index: src/test/java/course/concurrency/exams/auction/AuctionStoppableTests.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1251
+===================================================================
+diff --git a/src/test/java/course/concurrency/exams/auction/AuctionStoppableTests.java b/src/test/java/course/concurrency/exams/auction/AuctionStoppableTests.java
+new file mode 100644
+--- /dev/null	(date 1681219100040)
++++ b/src/test/java/course/concurrency/exams/auction/AuctionStoppableTests.java	(date 1681219100040)
+@@ -0,0 +1,128 @@
++package course.concurrency.exams.auction;
++
++import org.junit.jupiter.api.*;
++
++import java.util.concurrent.*;
++import java.util.concurrent.atomic.AtomicReference;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++public class AuctionStoppableTests {
++
++    private static final int TEST_COUNT = 10;
++    private static final ExecutionStatistics stat = new ExecutionStatistics();
++
++    private static final int iterations = 1_000_000;
++    private static final int poolSize = Runtime.getRuntime().availableProcessors();
++    private static final int bidCount = iterations * poolSize;
++
++    private ExecutorService executor;
++    private BlockingQueue<Long> priceQueue;
++    private long latestPrice;
++    private Notifier notifier;
++
++    @BeforeEach
++    public void setup() {
++        notifier = new Notifier();
++
++        executor = Executors.newFixedThreadPool(poolSize);
++        priceQueue = new ArrayBlockingQueue<>(bidCount);
++        for (long i = 0; i < bidCount/3; i++) {
++            priceQueue.offer(i-1);
++            priceQueue.offer(i);
++            priceQueue.offer(i+1);
++        }
++        latestPrice = bidCount/3;
++    }
++
++    @AfterEach
++    public void tearDown() {
++        notifier.shutdown();
++    }
++
++    @AfterAll
++    public static void printStat() {
++        stat.printStatistics();
++    }
++
++    @RepeatedTest(TEST_COUNT)
++    public void testPessimistic() throws InterruptedException {
++        AuctionStoppable pessimistic = new AuctionStoppablePessimistic(notifier);
++        testCorrectLatestBid(pessimistic, "pessimistic");
++    }
++
++    @RepeatedTest(TEST_COUNT)
++    public void testOptimistic() throws InterruptedException {
++        AuctionStoppable optimistic = new AuctionStoppableOptimistic(notifier);
++        testCorrectLatestBid(optimistic, "optimistic");
++    }
++
++    public void testCorrectLatestBid(AuctionStoppable auction, String tag) throws InterruptedException {
++        CountDownLatch latch = new CountDownLatch(1);
++
++        for (int i = 0; i < poolSize; i++) {
++            executor.submit(() -> {
++                try {
++                    latch.await();
++                } catch (InterruptedException ignored) {}
++
++                for (int it = 0; it < iterations; it++) {
++                    long value = priceQueue.poll();
++                    Bid bid = new Bid(value, value, value);
++                    auction.propose(bid);
++                }
++            });
++        }
++
++        long start = System.currentTimeMillis();
++        latch.countDown();
++        executor.shutdown();
++        executor.awaitTermination(10, TimeUnit.SECONDS);
++        long end = System.currentTimeMillis();
++
++        assertEquals(latestPrice, auction.getLatestBid().getPrice());
++        stat.addData(tag,end - start);
++    }
++
++    @Test
++    public void testStoppedAuctionPessimistic() throws InterruptedException {
++        AuctionStoppable auction = new AuctionStoppablePessimistic(notifier);
++        testStoppedAuction(auction);
++    }
++
++    @Test
++    public void testStoppedAuctionOptimistic() throws InterruptedException {
++        AuctionStoppable auction = new AuctionStoppableOptimistic(notifier);
++        testStoppedAuction(auction);
++    }
++
++    public void testStoppedAuction(AuctionStoppable auction) throws InterruptedException {
++        CountDownLatch latch = new CountDownLatch(1);
++        int priceToStop = iterations;
++        AtomicReference<Bid> latestBidWhenStopped = new AtomicReference<>();
++
++        for (int i = 0; i < poolSize; i++) {
++            executor.submit(() -> {
++                try {
++                    latch.await();
++                } catch (InterruptedException ignored) {}
++
++                for (int it = 0; it < iterations; it++) {
++                    long value = priceQueue.poll();
++                    Bid bid = new Bid(value, value, value);
++                    auction.propose(bid);
++                    if (bid.getPrice() == priceToStop) {
++                        Bid latest = auction.stopAuction();
++                        latestBidWhenStopped.set(latest);
++                    }
++                }
++            });
++        }
++
++        latch.countDown();
++        executor.shutdown();
++        executor.awaitTermination(10, TimeUnit.SECONDS);
++
++        assertEquals(latestBidWhenStopped.get().getPrice(), auction.getLatestBid().getPrice());
++    }
++}
+Index: src/test/java/course/concurrency/exams/auction/AuctionTests.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1251
+===================================================================
+diff --git a/src/test/java/course/concurrency/exams/auction/AuctionTests.java b/src/test/java/course/concurrency/exams/auction/AuctionTests.java
+new file mode 100644
+--- /dev/null	(date 1683635156177)
++++ b/src/test/java/course/concurrency/exams/auction/AuctionTests.java	(date 1683635156177)
+@@ -0,0 +1,88 @@
++package course.concurrency.exams.auction;
++
++import org.junit.jupiter.api.*;
++
++import java.util.concurrent.*;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++public class AuctionTests {
++
++    private static final int TEST_COUNT = 10;
++    private static final ExecutionStatistics stat = new ExecutionStatistics();
++
++    private static final int iterations = 1_000_000;
++    private static final int poolSize = Runtime.getRuntime().availableProcessors();
++    private static final int bidCount = iterations * poolSize;
++
++    private ExecutorService executor;
++    private BlockingQueue<Long> priceQueue;
++    private long expectedPrice;
++    private Notifier notifier;
++
++    @BeforeEach
++    public void setup() {
++        notifier = new Notifier();
++
++        executor = Executors.newFixedThreadPool(poolSize);
++        priceQueue = new ArrayBlockingQueue<>(bidCount);
++        for (long i = 0; i < bidCount/3; i++) {
++            priceQueue.offer(i-1);
++            priceQueue.offer(i);
++            priceQueue.offer(i+1);
++        }
++        expectedPrice = bidCount/3;
++    }
++
++    @AfterEach
++    public void tearDown() {
++        notifier.shutdown();
++    }
++
++    @AfterAll
++    public static void printStat() {
++        stat.printStatistics();
++    }
++
++    @RepeatedTest(TEST_COUNT)
++    public void testOptimistic() throws InterruptedException {
++        Auction auction = new AuctionOptimistic(notifier);
++        testCorrectLatestBid(auction, "optimistic");
++    }
++
++    @RepeatedTest(TEST_COUNT)
++    public void testPessimistic() throws InterruptedException {
++        Auction auction = new AuctionPessimistic(notifier);
++        testCorrectLatestBid(auction, "pessimistic");
++    }
++
++    public void testCorrectLatestBid(Auction auction, String tag) throws InterruptedException {
++        CountDownLatch latch = new CountDownLatch(1);
++        for (int i = 0; i < poolSize; i++) {
++
++            executor.submit(() -> {
++                try {
++                    latch.await();
++                } catch (InterruptedException ignored) {}
++
++                for (int it = 0; it < iterations; it++) {
++                    long value = priceQueue.poll();
++                    Bid bid = new Bid(value, value, value);
++                    auction.propose(bid);
++                    if (it % 200 == 0) {
++                        auction.getLatestBid();
++                    }
++                }
++            });
++        }
++
++        long start = System.currentTimeMillis();
++        latch.countDown();
++        executor.shutdown();
++        executor.awaitTermination(20, TimeUnit.SECONDS);
++        long end = System.currentTimeMillis();
++
++        assertEquals(expectedPrice, auction.getLatestBid().getPrice());
++        stat.addData(tag,end - start);
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/benchmarks/CounterBenchmarks.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/benchmarks/CounterBenchmarks.java b/src/main/java/course/concurrency/m3_shared/benchmarks/CounterBenchmarks.java
+new file mode 100644
+--- /dev/null	(date 1683627738216)
++++ b/src/main/java/course/concurrency/m3_shared/benchmarks/CounterBenchmarks.java	(date 1683627738216)
+@@ -0,0 +1,365 @@
++package course.concurrency.m3_shared.benchmarks;
++
++import org.openjdk.jmh.annotations.*;
++import org.openjdk.jmh.runner.Runner;
++import org.openjdk.jmh.runner.RunnerException;
++import org.openjdk.jmh.runner.options.Options;
++import org.openjdk.jmh.runner.options.OptionsBuilder;
++
++import java.util.concurrent.Semaphore;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicLong;
++import java.util.concurrent.atomic.LongAdder;
++import java.util.concurrent.locks.*;
++
++@State(Scope.Benchmark)
++@BenchmarkMode(Mode.Throughput)
++@OutputTimeUnit(TimeUnit.MILLISECONDS)
++public class CounterBenchmarks {
++
++    // Change WRITERS and READERS to experiment
++    public static final int WRITERS = 7;
++    public static final int READERS = 1;
++
++    private final AtomicLong atomicLongCounter = new AtomicLong();
++    private final LongAdder longAdderCounter = new LongAdder();
++
++    private final AtomicLong atomic = new AtomicLong();
++
++    private final Lock lock = new ReentrantLock();
++    private final Lock lockFair = new ReentrantLock(true);
++
++    private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
++    private final ReadWriteLock readWriteLockFair = new ReentrantReadWriteLock(true);
++
++    private final Semaphore semaphore = new Semaphore(1);
++    private final Semaphore semaphoreFair = new Semaphore(1, true);
++
++    private final StampedLock stampedLock = new StampedLock();
++
++    private long value;
++    private volatile long volatileValue;
++    private long newValue;
++    private long tmp = 0;
++
++    @Setup
++    public void setup() {
++        tmp++;
++        value = tmp;
++        volatileValue = tmp;
++        newValue = tmp+5;
++        atomic.set(value);
++    }
++
++    public static void main(String[] args) throws RunnerException {
++        Options options = new OptionsBuilder()
++                .include(CounterBenchmarks.class.getName())
++                .forks(1)
++//                .resultFormat(ResultFormatType.JSON)
++//                .result("benchmark-result.json")
++                .build();
++
++        new Runner(options).run();
++    }
++
++    @Benchmark
++    @Group("AtomicLong_counter")
++    @GroupThreads(WRITERS)
++    public long writeAtomicLong() {
++        return atomicLongCounter.incrementAndGet();
++    }
++
++    @Benchmark
++    @Group("AtomicLong_counter")
++    @GroupThreads(READERS)
++    public long readAtomicLong() {
++        return atomicLongCounter.get();
++    }
++
++    @Benchmark
++    @Group("LongAdder_counter")
++    @GroupThreads(WRITERS)
++    public void writeLongAdder() {
++        longAdderCounter.increment();
++    }
++
++    @Benchmark
++    @Group("LongAdder_counter")
++    @GroupThreads(READERS)
++    public long readLongAdder() {
++        return longAdderCounter.sum();
++    }
++
++    @Benchmark
++    @Group("ReentrantLock")
++    @GroupThreads(WRITERS)
++    public void writeReentrantLock() {
++        try {
++            lock.lock();
++            value++;
++        } finally {
++            lock.unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReentrantLock")
++    @GroupThreads(READERS)
++    public long readReentrantLock() {
++        try {
++            lock.lock();
++            return value;
++        } finally {
++            lock.unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReentrantLock_fair")
++    @GroupThreads(WRITERS)
++    public void writeReentrantLockFair() {
++        try {
++            lockFair.lock();
++            value++;
++        } finally {
++            lockFair.unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReentrantLock_fair")
++    @GroupThreads(READERS)
++    public long readReentrantLockFair() {
++        try {
++            lockFair.lock();
++            return value;
++        } finally {
++            lockFair.unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReadWriteLock")
++    @GroupThreads(WRITERS)
++    public void writeReadWriteLock() {
++        try {
++            readWriteLock.writeLock().lock();
++            value++;
++        } finally {
++            readWriteLock.writeLock().unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReadWriteLock")
++    @GroupThreads(READERS)
++    public long readReadWriteLock() {
++        try {
++            readWriteLock.readLock().lock();
++            return value;
++        } finally {
++            readWriteLock.readLock().unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReadWriteLock_fair")
++    @GroupThreads(WRITERS)
++    public void writeReadWriteLockFair() {
++        try {
++            readWriteLockFair.writeLock().lock();
++            value++;
++        } finally {
++            readWriteLockFair.writeLock().unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("ReadWriteLock_fair")
++    @GroupThreads(READERS)
++    public long readReadWriteLockFair() {
++        try {
++            readWriteLockFair.readLock().lock();
++            return value;
++        } finally {
++            readWriteLockFair.readLock().unlock();
++        }
++    }
++
++    @Benchmark
++    @Group("Semaphore")
++    @GroupThreads(WRITERS)
++    public void writeSemaphore() throws InterruptedException {
++        try {
++            semaphore.acquire();
++            value++;
++        } finally {
++            semaphore.release();
++        }
++    }
++
++    @Benchmark
++    @Group("Semaphore")
++    @GroupThreads(READERS)
++    public long readSemaphore() throws InterruptedException {
++        try {
++            semaphore.acquire();
++            return value;
++        } finally {
++            semaphore.release();
++        }
++    }
++
++    @Benchmark
++    @Group("Semaphore_fair")
++    @GroupThreads(WRITERS)
++    public void writeSemaphoreFair() throws InterruptedException {
++        try {
++            semaphoreFair.acquire();
++            value++;
++        } finally {
++            semaphoreFair.release();
++        }
++    }
++
++    @Benchmark
++    @Group("Semaphore_fair")
++    @GroupThreads(READERS)
++    public long readSemaphoreFair() throws InterruptedException {
++        try {
++            semaphoreFair.acquire();
++            return value;
++        } finally {
++            semaphoreFair.release();
++        }
++    }
++
++    @Benchmark
++    @Group("StampedLock_readwrite")
++    @GroupThreads(WRITERS)
++    public void writeStampedLockRW() {
++        long stamp = stampedLock.writeLock();
++        try {
++            value++;
++        } finally {
++            stampedLock.unlock(stamp);
++        }
++    }
++
++    @Benchmark
++    @Group("StampedLock_readwrite")
++    @GroupThreads(READERS)
++    public long readStampedLockRW() {
++        long stamp = stampedLock.readLock();
++        try {
++            return value;
++        } finally {
++            stampedLock.unlockRead(stamp);
++        }
++    }
++
++    @Benchmark
++    @Group("StampedLock_optimistic")
++    @GroupThreads(WRITERS)
++    public void writeStampedLockOptimistic() {
++        long stamp = stampedLock.writeLock();
++        try {
++            value++;
++        } finally {
++            stampedLock.unlock(stamp);
++        }
++    }
++
++    @Benchmark
++    @Group("StampedLock_optimistic")
++    @GroupThreads(READERS)
++    public long readStampedLockOptimistic() {
++        long stamp;
++        do {
++            stamp = stampedLock.tryOptimisticRead();
++            value = newValue;
++        } while (!stampedLock.validate(stamp));
++        return value;
++    }
++
++    @Benchmark
++    @Group("synchronized")
++    @GroupThreads(WRITERS)
++    public void writeSynchronized() {
++        synchronized (this) {
++            value++;
++        }
++    }
++
++    @Benchmark
++    @Group("synchronized")
++    @GroupThreads(READERS)
++    public long readSynchronized() {
++        synchronized (this) {
++            return value;
++        }
++    }
++
++    @Benchmark
++    @Group("volatile_synchronized")
++    @GroupThreads(WRITERS)
++    public void writeSynchronizedVolatile() {
++        synchronized (this) {
++            volatileValue++;
++        }
++    }
++
++    @Benchmark
++    @Group("volatile_synchronized")
++    @GroupThreads(READERS)
++    public long readSynchronizedVolatile() {
++        return volatileValue;
++    }
++
++    @Benchmark
++    @Group("volatile")
++    @GroupThreads(WRITERS)
++    public void writeVolatile() {
++        volatileValue = newValue;
++    }
++
++    @Benchmark
++    @Group("volatile")
++    @GroupThreads(READERS)
++    public long readVolatile() {
++        return volatileValue;
++    }
++
++    @Benchmark
++    @Group("Atomic")
++    @GroupThreads(READERS)
++    public long readAtomic() {
++        return atomic.get();
++    }
++
++    @Benchmark
++    @Group("Atomic")
++    @GroupThreads(WRITERS)
++    public void writeAtomic() {
++        atomic.set(newValue);
++    }
++
++    @Benchmark
++    @Group("Atomic_optimistic")
++    @GroupThreads(WRITERS)
++    public long updateOptimistic() {
++        long previous, tmp;
++        do {
++            previous = atomic.get();
++            tmp = previous + newValue;
++        } while (!atomic.compareAndSet(previous, newValue));
++        return newValue;
++    }
++
++    @Benchmark
++    @Group("Atomic_accumulate")
++    @GroupThreads(WRITERS)
++    public long updateAtomicMethods() {
++        return atomic.accumulateAndGet(newValue, (x1, x2) -> x1 + x2);
++    }
++}
+Index: src/test/java/course/concurrency/exams/auction/ExecutionStatistics.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1251
+===================================================================
+diff --git a/src/test/java/course/concurrency/exams/auction/ExecutionStatistics.java b/src/test/java/course/concurrency/exams/auction/ExecutionStatistics.java
+new file mode 100644
+--- /dev/null	(date 1681219100062)
++++ b/src/test/java/course/concurrency/exams/auction/ExecutionStatistics.java	(date 1681219100062)
+@@ -0,0 +1,27 @@
++package course.concurrency.exams.auction;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.LongSummaryStatistics;
++import java.util.concurrent.ConcurrentHashMap;
++
++import static java.util.stream.Collectors.summarizingLong;
++
++public class ExecutionStatistics {
++
++    private ConcurrentHashMap<String, List<Long>> stat = new ConcurrentHashMap<>();
++
++    public void addData(String method, Long duration) {
++        stat.putIfAbsent(method, new ArrayList<>());
++        stat.get(method).add(duration);
++    }
++
++    public void printStatistics() {
++        stat.forEach((k,v) -> System.out.println(k + ": " + listToStat(v)));
++    }
++
++    private String listToStat(List<Long> values) {
++        LongSummaryStatistics stat = values.stream().collect(summarizingLong(Long::valueOf));
++        return String.format("%.0f (%d-%d)", stat.getAverage(), stat.getMin(), stat.getMax());
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/Notifier.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/Notifier.java b/src/main/java/course/concurrency/exams/auction/Notifier.java
+new file mode 100644
+--- /dev/null	(date 1681219099870)
++++ b/src/main/java/course/concurrency/exams/auction/Notifier.java	(date 1681219099870)
+@@ -0,0 +1,16 @@
++package course.concurrency.exams.auction;
++
++public class Notifier {
++
++    public void sendOutdatedMessage(Bid bid) {
++        imitateSending();
++    }
++
++    private void imitateSending() {
++        try {
++            Thread.sleep(2000);
++        } catch (InterruptedException e) {}
++    }
++
++    public void shutdown() {}
++}
+Index: src/main/java/course/concurrency/exams/auction/Bid.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/Bid.java b/src/main/java/course/concurrency/exams/auction/Bid.java
+new file mode 100644
+--- /dev/null	(date 1683635156163)
++++ b/src/main/java/course/concurrency/exams/auction/Bid.java	(date 1683635156163)
+@@ -0,0 +1,25 @@
++package course.concurrency.exams.auction;
++
++public class Bid {
++    private Long id;
++    private Long participantId;
++    private Long price;
++
++    public Bid(Long id, Long participantId, Long price) {
++        this.id = id;
++        this.participantId = participantId;
++        this.price = price;
++    }
++
++    public Long getId() {
++        return id;
++    }
++
++    public Long getParticipantId() {
++        return participantId;
++    }
++
++    public Long getPrice() {
++        return price;
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimistic.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimistic.java b/src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimistic.java
+new file mode 100644
+--- /dev/null	(date 1681219099848)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionStoppablePessimistic.java	(date 1681219099848)
+@@ -0,0 +1,29 @@
++package course.concurrency.exams.auction;
++
++public class AuctionStoppablePessimistic implements AuctionStoppable {
++
++    private Notifier notifier;
++
++    public AuctionStoppablePessimistic(Notifier notifier) {
++        this.notifier = notifier;
++    }
++
++    private Bid latestBid;
++
++    public boolean propose(Bid bid) {
++        if (bid.getPrice() > latestBid.getPrice()) {
++            notifier.sendOutdatedMessage(latestBid);
++            latestBid = bid;
++            return true;
++        }
++        return false;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid;
++    }
++
++    public Bid stopAuction() {
++        return latestBid;
++    }
++}
+Index: src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimistic.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimistic.java b/src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimistic.java
+new file mode 100644
+--- /dev/null	(date 1681219099839)
++++ b/src/main/java/course/concurrency/exams/auction/AuctionStoppableOptimistic.java	(date 1681219099839)
+@@ -0,0 +1,29 @@
++package course.concurrency.exams.auction;
++
++public class AuctionStoppableOptimistic implements AuctionStoppable {
++
++    private Notifier notifier;
++
++    public AuctionStoppableOptimistic(Notifier notifier) {
++        this.notifier = notifier;
++    }
++
++    private Bid latestBid;
++
++    public boolean propose(Bid bid) {
++        if (bid.getPrice() > latestBid.getPrice()) {
++            notifier.sendOutdatedMessage(latestBid);
++            latestBid = bid;
++            return true;
++        }
++        return false;
++    }
++
++    public Bid getLatestBid() {
++        return latestBid;
++    }
++
++    public Bid stopAuction() {
++        return latestBid;
++    }
++}
+Index: src/test/java/course/concurrency/m3_shared/collections/RestaurantServiceTests.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>windows-1251
+===================================================================
+diff --git a/src/test/java/course/concurrency/m3_shared/collections/RestaurantServiceTests.java b/src/test/java/course/concurrency/m3_shared/collections/RestaurantServiceTests.java
+new file mode 100644
+--- /dev/null	(date 1683627825620)
++++ b/src/test/java/course/concurrency/m3_shared/collections/RestaurantServiceTests.java	(date 1683627825620)
+@@ -0,0 +1,72 @@
++package course.concurrency.m3_shared.collections;
++
++import course.concurrency.exams.auction.ExecutionStatistics;
++import org.junit.jupiter.api.AfterAll;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.RepeatedTest;
++
++import java.util.Set;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.TimeUnit;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++public class RestaurantServiceTests {
++
++    private static final int TEST_COUNT = 10;
++    private static final ExecutionStatistics stat = new ExecutionStatistics();
++
++    private static final int iterations = 1_000_000;
++    private static final int poolSize = Runtime.getRuntime().availableProcessors()*2;
++
++    private ExecutorService executor;
++    private RestaurantService service;
++
++    @BeforeEach
++    public void setup() {
++        executor = Executors.newFixedThreadPool(poolSize);
++        service = new RestaurantService();
++    }
++
++    @AfterAll
++    public static void printStat() {
++        stat.printStatistics();
++    }
++
++    @RepeatedTest(TEST_COUNT)
++    public void test() throws InterruptedException {
++        CountDownLatch latch = new CountDownLatch(1);
++
++        for (int i = 0; i < poolSize; i++) {
++            executor.submit(() -> {
++                try {
++                    latch.await();
++                } catch (InterruptedException ignored) {}
++
++                for (int it = 0; it < iterations; it++) {
++                    service.getByName("A");
++                    service.getByName("B");
++                    service.getByName("C");
++                }
++            });
++        }
++
++        long start = System.currentTimeMillis();
++        latch.countDown();
++        executor.shutdown();
++        executor.awaitTermination(30, TimeUnit.SECONDS);
++        long end = System.currentTimeMillis();
++
++        Set<String> statResult = service.printStat();
++
++        assertEquals(3, statResult.size());
++        assertTrue(statResult.contains("A - " + iterations*poolSize));
++        assertTrue(statResult.contains("B - " + iterations*poolSize));
++        assertTrue(statResult.contains("C - " + iterations*poolSize));
++
++        stat.addData("service",end - start);
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/immutable/PaymentInfo.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/immutable/PaymentInfo.java b/src/main/java/course/concurrency/m3_shared/immutable/PaymentInfo.java
+new file mode 100644
+--- /dev/null	(date 1681219099948)
++++ b/src/main/java/course/concurrency/m3_shared/immutable/PaymentInfo.java	(date 1681219099948)
+@@ -0,0 +1,4 @@
++package course.concurrency.m3_shared.immutable;
++
++public class PaymentInfo {
++}
+Index: src/main/java/course/concurrency/m3_shared/threadLocal/TL_example2.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example2.java b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example2.java
+new file mode 100644
+--- /dev/null	(date 1681219099980)
++++ b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example2.java	(date 1681219099980)
+@@ -0,0 +1,25 @@
++package course.concurrency.m3_shared.threadLocal;
++
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++public class TL_example2 {
++
++    public static class Task implements Runnable {
++        private static final ThreadLocal<Integer> value = ThreadLocal.withInitial(() -> 0);
++
++        @Override
++        public void run() {
++            Integer currentValue = value.get();
++            value.set(currentValue + 1);
++            System.out.print(value.get());
++        }
++    }
++
++    public static void main(String[] args) {
++        ExecutorService executor = Executors.newFixedThreadPool(5);
++        for (int i = 0; i < 10; i++) {
++            executor.submit(new Task());
++        }
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/immutable/OrderService.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/immutable/OrderService.java b/src/main/java/course/concurrency/m3_shared/immutable/OrderService.java
+new file mode 100644
+--- /dev/null	(date 1681219099936)
++++ b/src/main/java/course/concurrency/m3_shared/immutable/OrderService.java	(date 1681219099936)
+@@ -0,0 +1,46 @@
++package course.concurrency.m3_shared.immutable;
++
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++public class OrderService {
++
++    private Map<Long, Order> currentOrders = new HashMap<>();
++    private long nextId = 0L;
++
++    private synchronized long nextId() {
++        return nextId++;
++    }
++
++    public synchronized long createOrder(List<Item> items) {
++        long id = nextId();
++        Order order = new Order(items);
++        order.setId(id);
++        currentOrders.put(id, order);
++        return id;
++    }
++
++    public synchronized void updatePaymentInfo(long orderId, PaymentInfo paymentInfo) {
++        currentOrders.get(orderId).setPaymentInfo(paymentInfo);
++        if (currentOrders.get(orderId).checkStatus()) {
++            deliver(currentOrders.get(orderId));
++        }
++    }
++
++    public synchronized void setPacked(long orderId) {
++        currentOrders.get(orderId).setPacked(true);
++        if (currentOrders.get(orderId).checkStatus()) {
++            deliver(currentOrders.get(orderId));
++        }
++    }
++
++    private synchronized void deliver(Order order) {
++        /* ... */
++        currentOrders.get(order.getId()).setStatus(Order.Status.DELIVERED);
++    }
++
++    public synchronized boolean isDelivered(long orderId) {
++        return currentOrders.get(orderId).getStatus().equals(Order.Status.DELIVERED);
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/threadLocal/TL_example3.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example3.java b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example3.java
+new file mode 100644
+--- /dev/null	(date 1681219099992)
++++ b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example3.java	(date 1681219099992)
+@@ -0,0 +1,25 @@
++package course.concurrency.m3_shared.threadLocal;
++
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++public class TL_example3 {
++
++    public static class Task implements Runnable {
++        private final ThreadLocal<Integer> value = ThreadLocal.withInitial(() -> 0);
++
++        @Override
++        public void run() {
++            Integer currentValue = value.get();
++            value.set(currentValue + 1);
++            System.out.print(value.get());
++        }
++    }
++
++    public static void main(String[] args) {
++        ExecutorService executor = Executors.newFixedThreadPool(5);
++        for (int i = 0; i < 10; i++) {
++            executor.submit(new Task());
++        }
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/immutable/Order.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/immutable/Order.java b/src/main/java/course/concurrency/m3_shared/immutable/Order.java
+new file mode 100644
+--- /dev/null	(date 1681219099925)
++++ b/src/main/java/course/concurrency/m3_shared/immutable/Order.java	(date 1681219099925)
+@@ -0,0 +1,66 @@
++package course.concurrency.m3_shared.immutable;
++
++import java.util.List;
++
++import static course.concurrency.m3_shared.immutable.Order.Status.NEW;
++
++public class Order {
++
++    public enum Status { NEW, IN_PROGRESS, DELIVERED }
++
++    private Long id;
++    private List<Item> items;
++    private PaymentInfo paymentInfo;
++    private boolean isPacked;
++    private Status status;
++
++    public Order(List<Item> items) {
++        this.items = items;
++        this.status = NEW;
++    }
++
++    public synchronized boolean checkStatus() {
++        if (items != null && !items.isEmpty() && paymentInfo != null && isPacked) {
++            return true;
++        }
++        return false;
++    }
++
++    public Long getId() {
++        return id;
++    }
++
++    public void setId(Long id) {
++        this.id = id;
++    }
++
++    public List<Item> getItems() {
++        return items;
++    }
++
++    public PaymentInfo getPaymentInfo() {
++        return paymentInfo;
++    }
++
++    public void setPaymentInfo(PaymentInfo paymentInfo) {
++        this.paymentInfo = paymentInfo;
++        this.status = Status.IN_PROGRESS;
++    }
++
++    public boolean isPacked() {
++        return isPacked;
++    }
++
++    public void setPacked(boolean packed) {
++        isPacked = packed;
++        this.status = Status.IN_PROGRESS;
++    }
++
++    public Status getStatus() {
++        return status;
++    }
++
++    public void setStatus(Status status) {
++        this.status = status;
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/threadLocal/TL_example4.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example4.java b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example4.java
+new file mode 100644
+--- /dev/null	(date 1681219100010)
++++ b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example4.java	(date 1681219100010)
+@@ -0,0 +1,26 @@
++package course.concurrency.m3_shared.threadLocal;
++
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++public class TL_example4 {
++
++    public static class Task implements Runnable {
++        private static final ThreadLocal<Integer> value = ThreadLocal.withInitial(() -> 0);
++
++        @Override
++        public void run() {
++            Integer currentValue = value.get();
++            value.set(currentValue + 1);
++            System.out.print(value.get());
++        }
++    }
++
++    public static void main(String[] args) {
++        ExecutorService executor = Executors.newSingleThreadExecutor();
++        for (int i = 0; i < 5; i++) {
++            executor.submit(new Task());
++        }
++    }
++
++}
+Index: src/main/java/course/concurrency/m3_shared/immutable/Item.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/immutable/Item.java b/src/main/java/course/concurrency/m3_shared/immutable/Item.java
+new file mode 100644
+--- /dev/null	(date 1681219099914)
++++ b/src/main/java/course/concurrency/m3_shared/immutable/Item.java	(date 1681219099914)
+@@ -0,0 +1,4 @@
++package course.concurrency.m3_shared.immutable;
++
++public class Item {
++}
+Index: src/main/java/course/concurrency/m3_shared/threadLocal/TL_example5.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example5.java b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example5.java
+new file mode 100644
+--- /dev/null	(date 1681219100026)
++++ b/src/main/java/course/concurrency/m3_shared/threadLocal/TL_example5.java	(date 1681219100026)
+@@ -0,0 +1,26 @@
++package course.concurrency.m3_shared.threadLocal;
++
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++public class TL_example5 {
++
++    public static class Task implements Runnable {
++        private final ThreadLocal<Integer> value = ThreadLocal.withInitial(() -> 0);
++
++        @Override
++        public void run() {
++            Integer currentValue = value.get();
++            value.set(currentValue + 1);
++            System.out.print(value.get());
++        }
++    }
++
++    public static void main(String[] args) {
++        ExecutorService executor = Executors.newSingleThreadExecutor();
++        for (int i = 0; i < 5; i++) {
++            executor.submit(new Task());
++        }
++    }
++
++}
+Index: src/main/java/course/concurrency/m3_shared/collections/RestaurantService.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/collections/RestaurantService.java b/src/main/java/course/concurrency/m3_shared/collections/RestaurantService.java
+new file mode 100644
+--- /dev/null	(date 1681219099903)
++++ b/src/main/java/course/concurrency/m3_shared/collections/RestaurantService.java	(date 1681219099903)
+@@ -0,0 +1,31 @@
++package course.concurrency.m3_shared.collections;
++
++import java.util.HashSet;
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++
++public class RestaurantService {
++
++    private Map<String, Restaurant> restaurantMap = new ConcurrentHashMap<>() {{
++        put("A", new Restaurant("A"));
++        put("B", new Restaurant("B"));
++        put("C", new Restaurant("C"));
++    }};
++
++    private Object stat;
++
++    public Restaurant getByName(String restaurantName) {
++        addToStat(restaurantName);
++        return restaurantMap.get(restaurantName);
++    }
++
++    public void addToStat(String restaurantName) {
++        // your code
++    }
++
++    public Set<String> printStat() {
++        // your code
++        return new HashSet<>();
++    }
++}
+Index: src/main/java/course/concurrency/m3_shared/collections/Restaurant.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/course/concurrency/m3_shared/collections/Restaurant.java b/src/main/java/course/concurrency/m3_shared/collections/Restaurant.java
+new file mode 100644
+--- /dev/null	(date 1681219099892)
++++ b/src/main/java/course/concurrency/m3_shared/collections/Restaurant.java	(date 1681219099892)
+@@ -0,0 +1,12 @@
++package course.concurrency.m3_shared.collections;
++
++public class Restaurant {
++    private String name;
++    public Restaurant(String name) {
++        this.name = name;
++    }
++
++    public String getName() {
++        return name;
++    }
++}
