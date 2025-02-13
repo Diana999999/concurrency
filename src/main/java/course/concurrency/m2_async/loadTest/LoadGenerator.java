@@ -5,8 +5,8 @@ import java.util.stream.IntStream;
 public class LoadGenerator {
 
     public static void work() {
-//        sleep();
-        compute();
+        sleep();
+    /*    compute();*/
     }
 
     private static void sleep() {

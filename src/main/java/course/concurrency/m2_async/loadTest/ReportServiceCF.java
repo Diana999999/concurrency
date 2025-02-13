@@ -4,11 +4,12 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 
 public class ReportServiceCF {
 
-    private ExecutorService executor = ForkJoinPool.commonPool();
+    private ExecutorService executor = Executors.newCachedThreadPool();
 
     private LoadGenerator loadGenerator = new LoadGenerator();
 

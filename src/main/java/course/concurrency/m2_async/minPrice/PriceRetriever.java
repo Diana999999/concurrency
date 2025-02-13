@@ -4,7 +4,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class PriceRetriever {
 
-    public double getPrice(long itemId, long shopId) {
+    public Double getPrice(long itemId, long shopId) {
         int delay = ThreadLocalRandom.current().nextInt(10);
         sleep(delay);
         return ThreadLocalRandom.current().nextDouble(1000);

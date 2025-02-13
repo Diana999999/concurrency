@@ -6,7 +6,7 @@ import java.util.concurrent.*;
 
 public class ReportServiceExecutors {
 
-    private ExecutorService executor = Executors.newSingleThreadExecutor();
+    private ExecutorService executor = Executors.newCachedThreadPool();
 
     private LoadGenerator loadGenerator = new LoadGenerator();
 
