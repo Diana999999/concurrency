@@ -1,9 +1,9 @@
 package course.concurrency.m3_shared.collections;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class RestaurantService {
 
@@ -13,7 +13,9 @@ public class RestaurantService {
         put("C", new Restaurant("C"));
     }};
 
-    private Object stat;
+    private Map<String, Long> stat = new ConcurrentHashMap<>() {{
+        restaurantMap.forEach((k, v) -> put(k, 0L));
+    }};
 
     public Restaurant getByName(String restaurantName) {
         addToStat(restaurantName);
@@ -21,11 +23,12 @@ public class RestaurantService {
     }
 
     public void addToStat(String restaurantName) {
-        // your code
+        stat.computeIfPresent(restaurantName, (k, v) -> v + 1);
     }
 
     public Set<String> printStat() {
-        // your code
-        return new HashSet<>();
+        return stat.entrySet().stream()
+                .map(e -> e.getKey() + " - " + e.getValue())
+                .collect(Collectors.toSet());
     }
 }
